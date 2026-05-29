@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Benjamin Bellamy <bbellamy@linagora.com>
+
+app-id: fr.benjaminbellamy.dictee
+runtime: org.gnome.Platform
+runtime-version: '49'
+sdk: org.gnome.Sdk
+command: dictee
+
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  - --filesystem=home
+
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - '*.la'
+  - '*.a'
+
+modules:
+  - name: dictee
+    buildsystem: meson
+    sources:
+      - type: dir
+        path: .

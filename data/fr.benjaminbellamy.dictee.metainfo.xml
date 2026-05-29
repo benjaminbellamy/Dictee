@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later
+     Copyright (C) 2026 Benjamin Bellamy <bbellamy@linagora.com> -->
+<component type="desktop-application">
+  <id>fr.benjaminbellamy.dictee</id>
+  <name>Dictée</name>
+  <summary>Record a sentence-level audio dataset</summary>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <description>
+    <p>
+      Dictée walks you through a plain-text list of sentences, recording
+      each one from your microphone and producing matching WAV files
+      together with a tab-separated transcript manifest.
+    </p>
+    <p>
+      The output is intended as a ready-to-use dataset for training or
+      fine-tuning speech-recognition models: each audio file is 16-bit
+      signed PCM, mono, at a 16&#160;kHz sample rate.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">fr.benjaminbellamy.dictee.desktop</launchable>
+
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+    <category>Utility</category>
+  </categories>
+
+  <content_rating type="oars-1.1" />
+
+  <developer id="fr.benjaminbellamy">
+    <name>Benjamin Bellamy</name>
+  </developer>
+
+  <url type="homepage">https://github.com/</url>
+
+  <releases>
+    <release version="0.1.0" date="2026-05-29">
+      <description>
+        <p>Initial release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

@@ -1,0 +1,8 @@
+build/
+build-*/
+.flatpak-builder/
+repo/
+*.swp
+*.swo
+*~
+.vscode/

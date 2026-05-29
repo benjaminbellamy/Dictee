@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Dictée
+GenericName=Audio Dataset Recorder
+Comment=Record a sentence-level audio dataset for speech recognition training
+Exec=dictee %f
+Icon=fr.benjaminbellamy.dictee
+Terminal=false
+Type=Application
+Categories=AudioVideo;Audio;Utility;
+MimeType=text/plain;
+StartupNotify=true
