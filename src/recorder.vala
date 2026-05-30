@@ -1,24 +1,32 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
  * Copyright (C) 2026 Benjamin Bellamy <bbellamy@linagora.com>
  *
- * Always-on microphone capture. The GStreamer pipeline is built and started
- * once at app launch and stays in PLAYING for the entire session:
+ * Always-on microphone capture at 32-bit float / 32 kHz, processed in
+ * float, then downsample+quantize once to S16LE / 16 kHz at the write
+ * step. Capture pipeline:
  *
  *   {pipewiresrc|pulsesrc} ! audioconvert ! audioresample
- *     ! audio/x-raw,format=S16LE,rate=16000,channels=1,layout=interleaved
+ *     ! audio/x-raw,format=F32LE,rate=32000,channels=1,layout=interleaved
  *     ! appsink
  *
- * The microphone-startup transient (preamp settling, USB-mic boot, AGC
- * stabilisation) is consumed once, at launch, while the user is opening the
- * sentences file — never again per recording, which is what was producing
- * the leading pop in the previous design.
+ * The capture pipeline is built once at app launch and stays in PLAYING
+ * for the entire session, so the microphone-startup transient (preamp
+ * settling, USB-mic boot, AGC stabilisation) happens once, here, and
+ * never per-recording.
  *
- * Pressing Record only flips a flag; pressing Stop flips it back, slices
- * the captured byte buffer to drop the keypress clicks, writes a hand-built
- * canonical WAV file, and normalises it.
+ * Pressing Record flips a flag; pressing Stop:
+ *   1. Steals the captured byte buffer.
+ *   2. Crops CROP_START_DELAY_MS off the head and CROP_STOP_DELAY_MS off
+ *      the tail.
+ *   3. Reinterprets the rest as float[] and runs Normalize.in_place_f32
+ *      (DC removal, peak-normalise to -1 dBFS, 15 ms fade, defensive
+ *      clamp) at full IEEE 754 precision.
+ *   4. Pushes the processed float bytes through a short-lived encode
+ *      pipeline that does the F32LE/32k → S16LE/16k downsample,
+ *      quantises (audioconvert's TPDF dither), and writes the WAV via
+ *      wavenc + filesink.
  *
- * Player below is unchanged — playback still uses a per-clip playbin since
- * it has no "first playback is transient" problem.
+ * Player below is unchanged — playback still uses a per-clip playbin.
  */
 
 public class Recorder : Object {
@@ -34,10 +42,11 @@ public class Recorder : Object {
     // pressed (the click of the Stop key). 0 disables.
     public const int CROP_STOP_DELAY_MS = 0;
 
-    private const int SAMPLE_RATE = 16000;
-    private const int CHANNELS = 1;
-    private const int BITS_PER_SAMPLE = 16;
-    private const int BYTES_PER_SAMPLE = BITS_PER_SAMPLE / 8;
+    // Capture at high precision; downsample and quantize only at write.
+    public const int CAPTURE_RATE = 32000;          // clean 2:1 to OUTPUT_RATE
+    public const int OUTPUT_RATE  = 16000;          // dataset target
+    public const int CHANNELS     = 1;
+    public const int BYTES_PER_CAPTURE_SAMPLE = 4;  // F32LE
 
     private Gst.Pipeline? pipeline = null;
     private Gst.App.Sink? appsink = null;
@@ -88,8 +97,8 @@ public class Recorder : Object {
         }
 
         caps.set ("caps", Gst.Caps.from_string (
-            "audio/x-raw,format=S16LE,rate=%d,channels=%d,layout=interleaved"
-                .printf (SAMPLE_RATE, CHANNELS)));
+            "audio/x-raw,format=F32LE,rate=%d,channels=%d,layout=interleaved"
+                .printf (CAPTURE_RATE, CHANNELS)));
 
         // emit-signals=true makes new-sample fire; sync=false keeps the
         // sink from throttling to the pipeline clock (we want raw samples
@@ -148,8 +157,9 @@ public class Recorder : Object {
         return true;
     }
 
-    // Stop capturing, slice off head/tail crop, write the WAV, normalise,
-    // and emit stopped(success).
+    // Stop capturing, slice off head/tail crop, normalise in float, encode
+    // to S16LE/16 kHz WAV via a short-lived GStreamer pipeline, emit
+    // stopped(success).
     public void stop () {
         mutex.lock ();
         if (!recording) {
@@ -170,28 +180,103 @@ public class Recorder : Object {
             return;
         }
 
-        // Symmetric-but-independent crop: drop the first CROP_START_DELAY_MS
-        // and the last CROP_STOP_DELAY_MS of audio.
-        int head_bytes = CROP_START_DELAY_MS * SAMPLE_RATE / 1000
-                       * BYTES_PER_SAMPLE * CHANNELS;
-        int tail_bytes = CROP_STOP_DELAY_MS  * SAMPLE_RATE / 1000
-                       * BYTES_PER_SAMPLE * CHANNELS;
+        int head_bytes = CROP_START_DELAY_MS * CAPTURE_RATE / 1000
+                       * BYTES_PER_CAPTURE_SAMPLE * CHANNELS;
+        int tail_bytes = CROP_STOP_DELAY_MS  * CAPTURE_RATE / 1000
+                       * BYTES_PER_CAPTURE_SAMPLE * CHANNELS;
         if (head_bytes + tail_bytes >= captured.length) {
             warning ("Recording shorter than combined crop window — discarded");
             stopped (false);
             return;
         }
-        int kept_len = captured.length - head_bytes - tail_bytes;
+        int kept_bytes = captured.length - head_bytes - tail_bytes;
+        int n_samples  = kept_bytes / BYTES_PER_CAPTURE_SAMPLE;
 
-        uint8[] samples = new uint8[kept_len];
-        Memory.copy (samples, (uint8*) captured + head_bytes, kept_len);
+        // Reinterpret the kept slice as float[] via a memcpy. Cheap (<1 ms
+        // for a multi-second clip) and avoids unowned-array casting tricks.
+        float[] samples = new float[n_samples];
+        Memory.copy ((uint8*) samples,
+                     (uint8*) captured + head_bytes,
+                     n_samples * BYTES_PER_CAPTURE_SAMPLE);
 
-        if (!write_wav (path, samples)) {
-            stopped (false);
-            return;
+        Normalize.in_place_f32 (samples, CAPTURE_RATE);
+
+        // Pack the processed floats back into a byte payload for appsrc.
+        // The encode pipeline takes ownership.
+        uint8[] payload = new uint8[n_samples * BYTES_PER_CAPTURE_SAMPLE];
+        Memory.copy (payload,
+                     (uint8*) samples,
+                     n_samples * BYTES_PER_CAPTURE_SAMPLE);
+
+        bool ok = write_via_gstreamer (path, (owned) payload);
+        stopped (ok);
+    }
+
+    // Push the float bytes through a short-lived appsrc-based pipeline
+    // that does the F32LE/CAPTURE_RATE → S16LE/OUTPUT_RATE downsample and
+    // writes the WAV via wavenc + filesink. Blocks until EOS or a 5 s
+    // timeout (whichever comes first). Returns true iff EOS was seen.
+    private bool write_via_gstreamer (string path, owned uint8[] float_bytes) {
+        var pipe = new Gst.Pipeline ("dictee-encode");
+        var src  = Gst.ElementFactory.make ("appsrc",        "asrc");
+        var conv = Gst.ElementFactory.make ("audioconvert",  "conv");
+        var resa = Gst.ElementFactory.make ("audioresample", "resa");
+        var caps = Gst.ElementFactory.make ("capsfilter",    "caps");
+        var enc  = Gst.ElementFactory.make ("wavenc",        "enc");
+        var sink = Gst.ElementFactory.make ("filesink",      "sink");
+
+        if (pipe == null || src == null || conv == null || resa == null
+            || caps == null || enc == null || sink == null) {
+            warning ("Failed to instantiate encode elements");
+            return false;
         }
-        Normalize.wav_inplace (path);
-        stopped (true);
+
+        var appsrc = (Gst.App.Src) src;
+        appsrc.caps = Gst.Caps.from_string (
+            "audio/x-raw,format=F32LE,rate=%d,channels=%d,layout=interleaved"
+                .printf (CAPTURE_RATE, CHANNELS));
+        appsrc.format = Gst.Format.BYTES;
+
+        caps.set ("caps", Gst.Caps.from_string (
+            "audio/x-raw,format=S16LE,rate=%d,channels=%d,layout=interleaved"
+                .printf (OUTPUT_RATE, CHANNELS)));
+
+        sink.set ("location", path);
+
+        ((Gst.Bin) pipe).add_many (src, conv, resa, caps, enc, sink);
+        if (!src.link_many (conv, resa, caps, enc, sink)) {
+            warning ("Failed to link encode elements");
+            return false;
+        }
+
+        if (pipe.set_state (Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE) {
+            warning ("Encode pipeline failed to enter PLAYING");
+            pipe.set_state (Gst.State.NULL);
+            return false;
+        }
+
+        var buf = new Gst.Buffer.wrapped ((owned) float_bytes);
+        appsrc.push_buffer ((owned) buf);
+        appsrc.end_of_stream ();
+
+        var msg = pipe.get_bus ().timed_pop_filtered (
+            5 * Gst.SECOND,
+            Gst.MessageType.EOS | Gst.MessageType.ERROR);
+
+        pipe.set_state (Gst.State.NULL);
+
+        if (msg == null) {
+            warning ("Encode pipeline timed out");
+            return false;
+        }
+        if (msg.type == Gst.MessageType.ERROR) {
+            Error err;
+            string dbg;
+            msg.parse_error (out err, out dbg);
+            warning ("Encode pipeline error: %s (%s)", err.message, dbg);
+            return false;
+        }
+        return true;
     }
 
     // Set pipeline to NULL on app exit.
@@ -252,62 +337,6 @@ public class Recorder : Object {
                 break;
         }
         return Source.CONTINUE;
-    }
-
-    // Build a canonical 44-byte RIFF/WAVE/fmt /data header for
-    // PCM/mono/16000 Hz/16-bit, concatenate the sample bytes, and write
-    // atomically. Returns false on I/O failure.
-    private bool write_wav (string path, uint8[] samples) {
-        int data_size = samples.length;
-        int total = 44 + data_size;
-        uint8[] buf = new uint8[total];
-
-        int byte_rate = SAMPLE_RATE * CHANNELS * BYTES_PER_SAMPLE;
-        int block_align = CHANNELS * BYTES_PER_SAMPLE;
-
-        // RIFF header
-        buf[0] = 'R'; buf[1] = 'I'; buf[2] = 'F'; buf[3] = 'F';
-        write_u32le (buf, 4, (uint) (36 + data_size));
-        buf[8] = 'W'; buf[9] = 'A'; buf[10] = 'V'; buf[11] = 'E';
-
-        // fmt chunk
-        buf[12] = 'f'; buf[13] = 'm'; buf[14] = 't'; buf[15] = ' ';
-        write_u32le (buf, 16, 16);                          // fmt size
-        write_u16le (buf, 20, 1);                           // PCM
-        write_u16le (buf, 22, (uint16) CHANNELS);
-        write_u32le (buf, 24, (uint) SAMPLE_RATE);
-        write_u32le (buf, 28, (uint) byte_rate);
-        write_u16le (buf, 32, (uint16) block_align);
-        write_u16le (buf, 34, (uint16) BITS_PER_SAMPLE);
-
-        // data chunk
-        buf[36] = 'd'; buf[37] = 'a'; buf[38] = 't'; buf[39] = 'a';
-        write_u32le (buf, 40, (uint) data_size);
-
-        Memory.copy ((uint8*) buf + 44, samples, data_size);
-
-        try {
-            string etag_out;
-            File.new_for_path (path).replace_contents (
-                buf, null, false, FileCreateFlags.NONE,
-                out etag_out, null);
-            return true;
-        } catch (Error e) {
-            warning ("Cannot write %s: %s", path, e.message);
-            return false;
-        }
-    }
-
-    private static inline void write_u16le (uint8[] data, int off, uint16 v) {
-        data[off]     = (uint8) (v & 0xFF);
-        data[off + 1] = (uint8) ((v >> 8) & 0xFF);
-    }
-
-    private static inline void write_u32le (uint8[] data, int off, uint v) {
-        data[off]     = (uint8) (v & 0xFF);
-        data[off + 1] = (uint8) ((v >> 8) & 0xFF);
-        data[off + 2] = (uint8) ((v >> 16) & 0xFF);
-        data[off + 3] = (uint8) ((v >> 24) & 0xFF);
     }
 }
 

@@ -11,28 +11,30 @@ and produces matching WAV files plus a tab-separated transcript manifest.
 
 ## Audio format produced
 
-Every recording is written as **WAV, 16-bit signed PCM, mono, 16 000 Hz**
-(`audio/x-raw,format=S16LE,rate=16000,channels=1`). The format is fixed —
-the GStreamer pipeline caps the source to those exact values via
-`audioconvert` and `audioresample` regardless of the microphone's native
-configuration.
+Every WAV on disk is **16-bit signed PCM, mono, 16 000 Hz**
+(`audio/x-raw,format=S16LE,rate=16000,channels=1`). This is the dataset
+target and never changes — but it's not what we *capture* at.
 
 ## Capture architecture
 
-The microphone pipeline runs continuously for the whole app session:
+Internally, capture and all DSP run at **32-bit float / 32 kHz**:
 
 ```
 {pipewiresrc | pulsesrc} ! audioconvert ! audioresample
-                         ! S16LE/16 kHz/mono caps
+                         ! F32LE / 32 kHz / mono caps
                          ! appsink
 ```
 
+The capture pipeline runs continuously for the whole app session, so the
+microphone-startup transient (preamp settling, USB-mic boot, AGC
+stabilisation) happens **once**, at app launch, while you're opening the
+sentences file — not on every recording.
+
 Pressing **Record** only sets a flag that starts appending samples to an
-in-memory buffer; pressing **Stop** flips it back, writes a hand-built
-WAV, and post-processes it. This means the microphone-startup transient
-(preamp settling, USB-mic boot, AGC stabilisation) happens **once**, at
-app launch, while you're opening the sentences file — not on every
-recording.
+in-memory buffer; pressing **Stop** does all the post-processing in
+float, then quantises and downsamples in a single step at write time.
+This is the standard "process at high precision, quantize once at the
+end" mastering workflow.
 
 Two cropping knobs in `src/recorder.vala` swallow the residual key-press
 clicks of pressing Record and Stop on the keyboard:
@@ -43,17 +45,30 @@ clicks of pressing Record and Stop on the keyboard:
 Tune them once you measure how long the press of each key takes to reach
 your mic.
 
-After cropping, every recording is normalised in place:
+After cropping, the float buffer is normalised in place by
+`Normalize.in_place_f32` (`src/normalize.vala`):
 
 1. The DC offset is removed so the signal is centred on zero.
 2. Samples are peak-normalised to **-1 dBFS** for clip-to-clip loudness
    consistency without touching dynamics.
-3. A 15 ms linear fade-in/out is applied to guarantee the first/last
-   sample is exactly zero.
+3. A 15 ms linear fade-in/out is applied so the first/last sample is
+   exactly zero.
+4. Samples are defensively clamped to `[-1.0, 1.0]`.
 
-`Normalize.wav_inplace` runs on every newly-written WAV without
-exception. Target dBFS, fade length, and (escape-hatch) trim lengths are
-constants at the top of `src/normalize.vala`.
+The processed float buffer is then handed to a short-lived second
+GStreamer pipeline:
+
+```
+appsrc(F32LE/32 kHz) ! audioconvert ! audioresample
+                     ! S16LE / 16 kHz / mono caps
+                     ! wavenc ! filesink
+```
+
+`audioresample` does the 2:1 downsample with its anti-alias filter, and
+`audioconvert` does the float → int16 quantisation with TPDF dither.
+The output WAV is exactly the dataset format spec. Target dBFS and fade
+length are constants at the top of `src/normalize.vala`; the capture and
+output rates are constants in `src/recorder.vala`.
 
 ## Sentences file
 
