@@ -11,6 +11,7 @@ project('dictee', ['vala', 'c'],
 gtk     = dependency('gtk4',          version: '>= 4.10')
 adwaita = dependency('libadwaita-1',  version: '>= 1.4')
 gst     = dependency('gstreamer-1.0', version: '>= 1.20')
+gstapp  = dependency('gstreamer-app-1.0', version: '>= 1.20')
 glib    = dependency('glib-2.0')
 gobject = dependency('gobject-2.0')
 gio     = dependency('gio-2.0')

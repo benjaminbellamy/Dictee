@@ -12,6 +12,18 @@ private enum Mode {
     PLAYING
 }
 
+// Tracks the user's last semantic button action. Drives the keyboard
+// focus transitions documented in build_working_view and the four
+// handlers below.
+private enum LastAction {
+    INITIAL,
+    PREVIOUS,
+    NEXT,
+    RECORD,
+    STOP,
+    PLAY
+}
+
 public class DicteeWindow : Adw.ApplicationWindow {
 
     // State
@@ -26,6 +38,8 @@ public class DicteeWindow : Adw.ApplicationWindow {
 
     private Recorder recorder = new Recorder ();
     private Player player = new Player ();
+    private bool mic_available = false;
+    private LastAction last_action = LastAction.INITIAL;
 
     // Widgets we mutate after construction
     private Adw.WindowTitle window_title;
@@ -50,6 +64,46 @@ public class DicteeWindow : Adw.ApplicationWindow {
 
         recorder.stopped.connect (on_recorder_stopped);
         player.stopped.connect (on_player_stopped);
+
+        // Start the always-on capture pipeline immediately so the
+        // microphone-startup transient is consumed once, here, while the
+        // user is opening their sentences file. From then on, every
+        // recording is a slice of a long-running warm stream.
+        mic_available = recorder.init ();
+        if (!mic_available) {
+            warning ("Microphone unavailable — Record will stay disabled");
+        }
+
+        // On close: finalise any in-flight recording, then stop the
+        // capture pipeline cleanly.
+        close_request.connect (on_close_request);
+    }
+
+    private bool on_close_request () {
+        if (mode == Mode.RECORDING) {
+            recorder.stop ();
+        }
+        if (mode == Mode.PLAYING) {
+            player.stop ();
+        }
+        recorder.shutdown ();
+        return false; // let the default destroy path proceed
+    }
+
+    // Move keyboard focus to `target` and force the focus ring to be
+    // visible (GTK4 hides it by default when focus is set programmatically
+    // rather than via Tab). Deferred via Idle.add so it works regardless of
+    // whether we are mid-realisation or mid-signal-dispatch. We honour the
+    // rule strictly — no silent fall-back to Record. If the target happens
+    // to be insensitive, grab_focus is a no-op and focus stays where it
+    // was; that's still preferable to misleading the user about which
+    // button is selected.
+    private void focus_button (Gtk.Button target) {
+        Idle.add (() => {
+            target.grab_focus ();
+            this.focus_visible = true;
+            return Source.REMOVE;
+        });
     }
 
     // ---------------------------------------------------------------- UI
@@ -130,9 +184,13 @@ public class DicteeWindow : Adw.ApplicationWindow {
         var button_row = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 12);
         button_row.halign = Gtk.Align.CENTER;
         button_row.margin_top = 12;
+        // Lock all four buttons to the same width. This keeps Record/Stop
+        // identical in size (the only one whose label swaps) so the focus
+        // ring doesn't shift visually when toggling state.
+        button_row.homogeneous = true;
 
         prev_button = make_button ("go-previous-symbolic", _("Previous"));
-        prev_button.clicked.connect (() => go_to (index - 1));
+        prev_button.clicked.connect (on_prev_clicked);
         button_row.append (prev_button);
 
         record_button = make_button ("media-record-symbolic", _("Record"));
@@ -145,7 +203,7 @@ public class DicteeWindow : Adw.ApplicationWindow {
         button_row.append (play_button);
 
         next_button = make_button ("go-next-symbolic", _("Next"));
-        next_button.clicked.connect (() => go_to (index + 1));
+        next_button.clicked.connect (on_next_clicked);
         button_row.append (next_button);
 
         box.append (button_row);
@@ -172,11 +230,11 @@ public class DicteeWindow : Adw.ApplicationWindow {
 
         ctrl.add_shortcut (new Gtk.Shortcut (
             Gtk.ShortcutTrigger.parse_string ("Left"),
-            new Gtk.CallbackAction ((w, _a) => { go_to (index - 1); return true; })));
+            new Gtk.CallbackAction ((w, _a) => { on_prev_clicked (); return true; })));
 
         ctrl.add_shortcut (new Gtk.Shortcut (
             Gtk.ShortcutTrigger.parse_string ("Right"),
-            new Gtk.CallbackAction ((w, _a) => { go_to (index + 1); return true; })));
+            new Gtk.CallbackAction ((w, _a) => { on_next_clicked (); return true; })));
 
         ctrl.add_shortcut (new Gtk.Shortcut (
             Gtk.ShortcutTrigger.parse_string ("p"),
@@ -251,6 +309,10 @@ public class DicteeWindow : Adw.ApplicationWindow {
         regenerate_manifest ();
         body_stack.visible_child_name = "working";
         refresh_ui ();
+
+        // Sentences just loaded — workflow starts on Record.
+        last_action = LastAction.INITIAL;
+        focus_button (record_button);
     }
 
     private void pick_resume_index () {
@@ -331,6 +393,27 @@ public class DicteeWindow : Adw.ApplicationWindow {
         refresh_ui ();
     }
 
+    // ----------------------------------------------- Focus-driven clicks
+
+    // Rule: pressing Previous after any non-Previous action selects Play
+    //       (you went back to verify what was there). Pressing Previous
+    //       after Previous keeps you on Previous (navigating backward).
+    private void on_prev_clicked () {
+        bool was_prev = (last_action == LastAction.PREVIOUS);
+        go_to (index - 1);
+        last_action = LastAction.PREVIOUS;
+        focus_button (was_prev ? prev_button : play_button);
+    }
+
+    // Rule: pressing Next after Stop selects Record (continue recording the
+    //       newly-selected sentence). Otherwise stay on Next.
+    private void on_next_clicked () {
+        bool after_stop = (last_action == LastAction.STOP);
+        go_to (index + 1);
+        last_action = LastAction.NEXT;
+        focus_button (after_stop ? record_button : next_button);
+    }
+
     // -------------------------------------------------- Record / play
 
     private void on_record_clicked () {
@@ -341,7 +424,9 @@ public class DicteeWindow : Adw.ApplicationWindow {
             player.stop ();
         }
         if (mode == Mode.RECORDING) {
-            // Toggle off — send EOS and wait for the bus to fire stopped().
+            // Toggle off. recorder.stop() finalises synchronously and
+            // emits stopped(true), which fires on_recorder_stopped (where
+            // the focus moves to Next per the workflow rule).
             recorder.stop ();
             return;
         }
@@ -351,7 +436,10 @@ public class DicteeWindow : Adw.ApplicationWindow {
         string path = audio_path (index);
         if (recorder.start (path)) {
             mode = Mode.RECORDING;
+            last_action = LastAction.RECORD;
             refresh_ui ();
+            // Focus stays on the same button — it just became Stop.
+            focus_button (record_button);
         } else {
             show_error (_("Failed to start recording."));
         }
@@ -361,18 +449,19 @@ public class DicteeWindow : Adw.ApplicationWindow {
         if (!success) {
             show_error (_("Recording failed; the file may be incomplete."));
         }
+        // Recorder writes the WAV and calls Normalize.wav_inplace itself
+        // before emitting this signal — we just refresh the disk state.
         if (sentences.length > 0 && output_dir != null) {
             string path = audio_path (index);
-            if (success && File.new_for_path (path).query_exists ()) {
-                // Peak-normalise the freshly written WAV before it counts
-                // as recorded. Header bytes are preserved.
-                Normalize.wav_inplace (path);
-            }
             recorded[index] = File.new_for_path (path).query_exists ();
             regenerate_manifest ();
         }
         mode = Mode.IDLE;
+        last_action = LastAction.STOP;
         refresh_ui ();
+        // Rule: after Stop, jump focus to Next so the workflow continues
+        // record → stop → next → record → stop → next …
+        focus_button (next_button);
     }
 
     private void on_play_clicked () {
@@ -381,6 +470,8 @@ public class DicteeWindow : Adw.ApplicationWindow {
         }
         if (mode == Mode.PLAYING) {
             player.stop ();
+            last_action = LastAction.PLAY;
+            focus_button (play_button);
             return;
         }
         if (mode != Mode.IDLE || !recorded[index]) {
@@ -389,7 +480,9 @@ public class DicteeWindow : Adw.ApplicationWindow {
         string uri = File.new_for_path (audio_path (index)).get_uri ();
         if (player.play (uri)) {
             mode = Mode.PLAYING;
+            last_action = LastAction.PLAY;
             refresh_ui ();
+            focus_button (play_button);
         } else {
             show_error (_("Failed to start playback."));
         }
@@ -398,6 +491,9 @@ public class DicteeWindow : Adw.ApplicationWindow {
     private void on_player_stopped () {
         mode = Mode.IDLE;
         refresh_ui ();
+        // Keep focus where the user last semantically acted (Play). The
+        // last_action was already set to PLAY when playback was kicked off
+        // or stopped; nothing more to do.
     }
 
     // -------------------------------------------------------- File dialogs
@@ -478,7 +574,7 @@ public class DicteeWindow : Adw.ApplicationWindow {
             record_button.remove_css_class ("destructive-action");
             record_button.add_css_class ("suggested-action");
         }
-        record_button.sensitive = (mode != Mode.PLAYING);
+        record_button.sensitive = mic_available && (mode != Mode.PLAYING);
 
         var play_content = (Adw.ButtonContent) play_button.child;
         if (mode == Mode.PLAYING) {

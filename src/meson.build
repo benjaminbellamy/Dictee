@@ -3,6 +3,6 @@
 
 executable('dictee',
   ['main.vala', 'window.vala', 'recorder.vala', 'normalize.vala'],
-  dependencies: [gtk, adwaita, gst, glib, gobject, gio, m_dep],
+  dependencies: [gtk, adwaita, gst, gstapp, glib, gobject, gio, m_dep],
   install: true,
 )

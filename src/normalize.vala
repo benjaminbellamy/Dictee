@@ -16,12 +16,15 @@
 
 namespace Normalize {
 
-    // Discard this much of audio at the start (mic startup transient) and
-    // at the end (release click when Stop is pressed). The Record/Stop
-    // reaction time leaves enough headroom that these trims don't eat
-    // actual speech.
-    public const int TRIM_START_MS = 550;
-    public const int TRIM_END_MS = 150;
+    // Head/tail trim is now zero by default. With the always-on capture
+    // pipeline the mic transient never reaches the WAV in the first place,
+    // and keypress-click trimming lives in Recorder (CROP_START_DELAY_MS,
+    // CROP_STOP_DELAY_MS) so there's a single place to tune it. These two
+    // constants stay around as an escape hatch but are kept at zero so
+    // Normalize.wav_inplace is now idempotent — useful if it ever runs on
+    // a pre-existing file.
+    public const int TRIM_START_MS = 0;
+    public const int TRIM_END_MS = 0;
 
     // Target peak level. -1 dBFS leaves a touch of headroom so subsequent
     // resampling or codec passes don't clip.

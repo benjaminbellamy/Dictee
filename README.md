@@ -17,19 +17,43 @@ the GStreamer pipeline caps the source to those exact values via
 `audioconvert` and `audioresample` regardless of the microphone's native
 configuration.
 
-After each recording the WAV is post-processed in place:
+## Capture architecture
 
-1. The first **550 ms** are trimmed to skip the microphone-startup
-   transient (preamp settling, USB-mic boot) and the last **150 ms** are
-   trimmed to drop the Stop-button release click.
-2. The DC offset is removed so the signal is centred on zero.
-3. Samples are peak-normalised to **-1 dBFS** for clip-to-clip loudness
+The microphone pipeline runs continuously for the whole app session:
+
+```
+{pipewiresrc | pulsesrc} ! audioconvert ! audioresample
+                         ! S16LE/16 kHz/mono caps
+                         ! appsink
+```
+
+Pressing **Record** only sets a flag that starts appending samples to an
+in-memory buffer; pressing **Stop** flips it back, writes a hand-built
+WAV, and post-processes it. This means the microphone-startup transient
+(preamp settling, USB-mic boot, AGC stabilisation) happens **once**, at
+app launch, while you're opening the sentences file — not on every
+recording.
+
+Two cropping knobs in `src/recorder.vala` swallow the residual key-press
+clicks of pressing Record and Stop on the keyboard:
+
+- `CROP_START_DELAY_MS` — drop this much audio after Record (default 0)
+- `CROP_STOP_DELAY_MS` — drop this much audio before Stop (default 0)
+
+Tune them once you measure how long the press of each key takes to reach
+your mic.
+
+After cropping, every recording is normalised in place:
+
+1. The DC offset is removed so the signal is centred on zero.
+2. Samples are peak-normalised to **-1 dBFS** for clip-to-clip loudness
    consistency without touching dynamics.
-4. A 15 ms linear fade-in/out is applied to kill any residual
-   playback-start/end discontinuity.
+3. A 15 ms linear fade-in/out is applied to guarantee the first/last
+   sample is exactly zero.
 
-The trim lengths, target dBFS and fade length are constants at the top
-of `src/normalize.vala` if you want to retune.
+`Normalize.wav_inplace` runs on every newly-written WAV without
+exception. Target dBFS, fade length, and (escape-hatch) trim lengths are
+constants at the top of `src/normalize.vala`.
 
 ## Sentences file
 
