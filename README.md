@@ -1,6 +1,6 @@
 # Dictée
 
-![Dictée](data/icons/hicolor/scalable/apps/fr.benjaminbellamy.dictee.svg)
+<img src="data/icons/hicolor/scalable/apps/fr.benjaminbellamy.dictee.svg" alt="Dictée" width="96" height="96"/>
 
 > **dictée** _f_ (plural dictées)
 > dictée [\dik.te\] _féminin_
@@ -10,6 +10,22 @@ A small Linux desktop app (GTK 4 + libadwaita, in Vala) to record an audio
 dataset for training or fine-tuning speech-recognition models. Dictée walks
 through a UTF-8 list of sentences, records each one from the microphone,
 and produces matching WAV files plus a tab-separated transcript manifest.
+
+## Install
+
+```sh
+curl -L -o /tmp/dictee.flatpak \
+    https://github.com/benjaminbellamy/Dictee/releases/download/v1.0.0/dictee-1.0.0.flatpak \
+    && flatpak install --user --bundle /tmp/dictee.flatpak
+```
+
+Run it:
+
+```sh
+flatpak run fr.benjaminbellamy.dictee path/to/sentences.txt
+```
+
+See the [releases page](https://github.com/benjaminbellamy/Dictee/releases) for all versions.
 
 ![Screenshot](data/screenshots/screenshot.png)
 
