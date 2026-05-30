@@ -46,6 +46,19 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.0" date="2026-05-30">
+      <description>
+        <p>First stable release.</p>
+        <ul>
+          <li>Always-on microphone capture pipeline: the mic-startup transient happens once at app launch instead of on every recording.</li>
+          <li>Capture and DSP at 32-bit float / 32 kHz; downsample and quantize to S16LE / 16 kHz only at write time.</li>
+          <li>Per-clip DC-offset removal, peak normalisation to -1 dBFS, and a 15 ms linear fade-in/out.</li>
+          <li>Independent head and tail crop knobs to swallow Record / Stop key-press clicks.</li>
+          <li>Resume-from-disk and self-healing TSV manifest.</li>
+          <li>Keyboard-first workflow with smart focus transitions between Previous, Record, Play, and Next.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-05-29">
       <description>
         <p>Initial release.</p>
