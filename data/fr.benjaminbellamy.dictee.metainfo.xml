@@ -36,7 +36,14 @@
     <name>Benjamin Bellamy</name>
   </developer>
 
-  <url type="homepage">https://github.com/</url>
+  <url type="homepage">https://github.com/benjaminbellamy/Dictee</url>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>Recording a sentence from the list</caption>
+      <image>https://raw.githubusercontent.com/benjaminbellamy/Dictee/main/data/screenshots/screenshot.png</image>
+    </screenshot>
+  </screenshots>
 
   <releases>
     <release version="0.1.0" date="2026-05-29">

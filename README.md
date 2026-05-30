@@ -11,6 +11,8 @@ dataset for training or fine-tuning speech-recognition models. Dictée walks
 through a UTF-8 list of sentences, records each one from the microphone,
 and produces matching WAV files plus a tab-separated transcript manifest.
 
+![Screenshot](data/screenshots/screenshot.png)
+
 ## Audio format produced
 
 Every WAV on disk is **16-bit signed PCM, mono, 16 000 Hz**
