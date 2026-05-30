@@ -100,17 +100,40 @@ scratch after every successful recording (and once at launch) by scanning
 the on-disk WAV files. A truncated or stale `trans.txt` self-heals on next
 launch.
 
-## Keyboard shortcuts
+## Keyboard
 
-- **Space** — start / stop recording
-- **←** / **→** — previous / next sentence (disabled while recording)
-- **P** — play the current recording
+Dictée is designed to be driven entirely from the keyboard.
+
+- **Tab / Shift+Tab** — move keyboard focus between the four buttons
+  (Previous, Record, Play, Next). The button row is homogeneous-width so
+  Record/Stop stay the same size when the label swaps.
+- **Enter** (or **Space**) — activate the focused button.
+- **←** / **→** — previous / next sentence (equivalent to activating
+  Previous / Next).
+- **P** — play the current recording.
+
+After a sentences file is loaded, focus lands on **Record**. The focus
+ring is forced visible so you always see which button is selected. Focus
+then follows these rules as you work:
+
+| You activate    | Next focus lands on                                       |
+| --------------- | --------------------------------------------------------- |
+| **Record**      | Same button (it has just become Stop).                    |
+| **Stop**        | **Next** — so you can jump straight to the next sentence. |
+| **Next**        | **Next** normally; **Record** if you just hit Stop.       |
+| **Previous**    | **Play** — so you can verify what you went back to.       |
+| **Previous** *after* Previous | **Previous** — you're navigating backwards. |
+| **Play**        | Same button.                                              |
+
+With the default workflow Record → Stop → Next → Record → Stop → Next …
+you never leave the keyboard.
 
 ## Build and run locally (Meson)
 
 System packages needed (names are Debian/Ubuntu-ish; adjust for your
 distro): `meson`, `ninja-build`, `valac`, `libgtk-4-dev`,
 `libadwaita-1-dev`, `libgstreamer1.0-dev`,
+`libgstreamer-plugins-base1.0-dev` (for `Gst.App.Sink`),
 `gstreamer1.0-plugins-base`, `gstreamer1.0-plugins-good`,
 `gstreamer1.0-pulseaudio` and/or `gstreamer1.0-pipewire`.
 
