@@ -115,6 +115,13 @@ public class DicteeWindow : Adw.ApplicationWindow {
         window_title = new Adw.WindowTitle ("Dictée", "");
         header.title_widget = window_title;
 
+        // Small app icon on the left of the header bar. The icon name
+        // resolves to data/icons/hicolor/scalable/apps/fr.benjaminbellamy.dictee.svg
+        // installed by Meson into the system/Flatpak icon theme.
+        var app_icon = new Gtk.Image.from_icon_name ("fr.benjaminbellamy.dictee");
+        app_icon.pixel_size = 24;
+        header.pack_start (app_icon);
+
         // Hamburger menu: open sentences file, change output folder.
         var menu = new Menu ();
         menu.append (_("Open sentences file…"), "win.open-sentences");

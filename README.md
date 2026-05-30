@@ -1,5 +1,7 @@
 # Dictée
 
+![Dictée](data/icons/hicolor/scalable/apps/fr.benjaminbellamy.dictee.svg)
+
 > **dictée** _f_ (plural dictées)
 > dictée [\dik.te\] _féminin_
 > French, dictation, the process of speaking for someone else to write down the words
