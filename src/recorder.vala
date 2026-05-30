@@ -35,12 +35,12 @@ public class Recorder : Object {
 
     // Drop this much audio after the moment Record was pressed (the
     // acoustic click of the Record key reaching the mic). 0 disables.
-    public const int CROP_START_DELAY_MS = 0;
+    public const int CROP_START_DELAY_MS = 250;
 
     // Drop this much audio from the tail of the captured buffer — i.e.
     // effectively stop the recording this far before the Stop key was
     // pressed (the click of the Stop key). 0 disables.
-    public const int CROP_STOP_DELAY_MS = 0;
+    public const int CROP_STOP_DELAY_MS = 250;
 
     // Capture at high precision; downsample and quantize only at write.
     public const int CAPTURE_RATE = 32000;          // clean 2:1 to OUTPUT_RATE

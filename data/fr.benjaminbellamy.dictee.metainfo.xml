@@ -46,6 +46,11 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.1" date="2026-05-30">
+      <description>
+        <p>Set the default head and tail crop windows to 250 ms each to swallow Record / Stop key-press clicks on most keyboards.</p>
+      </description>
+    </release>
     <release version="1.0.0" date="2026-05-30">
       <description>
         <p>First stable release.</p>

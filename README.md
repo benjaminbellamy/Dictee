@@ -15,7 +15,7 @@ and produces matching WAV files plus a tab-separated transcript manifest.
 
 ```sh
 curl -L -o /tmp/dictee.flatpak \
-    https://github.com/benjaminbellamy/Dictee/releases/download/v1.0.0/dictee-1.0.0.flatpak \
+    https://github.com/benjaminbellamy/Dictee/releases/download/v1.0.1/dictee-1.0.1.flatpak \
     && flatpak install --user --bundle /tmp/dictee.flatpak
 ```
 
